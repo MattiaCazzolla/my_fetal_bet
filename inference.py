@@ -189,7 +189,6 @@ def main(args):
 
         # merge data back together
         masked_volumes = sorted(glob(os.path.join(tmp_folder, f"volume_*{args.suffix}.nii*")))
-        print(masked_volumes)
 
         data_list = []
         for file in masked_volumes:
@@ -198,7 +197,7 @@ def main(args):
 
         data_4d = np.stack(data_list, axis=-1)
         nifti_4d = nib.Nifti1Image(data_4d, data.affine)
-        nib.save(nifti_4d, os.path.join(args.output_path, f"{Path(args.input_path).resolve().stem}_{args.suffix}.nii.gz"))
+        nib.save(nifti_4d, os.path.join(args.output_path, f"{str(Path(args.input_path).stem).split('.')[0]}_{args.suffix}.nii.gz"))
 
         shutil.rmtree(tmp_folder)
 
