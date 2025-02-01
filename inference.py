@@ -206,11 +206,12 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--device', type=str, default=DEFAULT_DEVICE, help='Device to use for computation')
-    parser.add_argument('--saved_model_path', type=str, default=DEFAULT_MODEL_PATH, help='Path to the saved model')
     parser.add_argument('--input_path', type=str, required=True, help='Path to the input file')
     parser.add_argument('--output_path', type=str, required=True, help='Path to save the output mask')
+    parser.add_argument('--saved_model_path', type=str, default=DEFAULT_MODEL_PATH, help='Path to the saved model')
     parser.add_argument('--suffix', type=str, default=DEFAULT_SUFFIX, help='Suffix for output mask')
+    parser.add_argument('--device', type=str, default=DEFAULT_DEVICE, help='Device to use for computation')
+    
 
     args = parser.parse_args()
     main(args)
