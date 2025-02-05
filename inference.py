@@ -60,7 +60,13 @@ class FetalTestDataLoader:
         self.img_size = img_size
 
     def get_transforms(self):
-        """Define test data transformations."""
+        """
+        Defines the sequence of transformations to apply to test images:
+        1. Load the image
+        2. Ensure the channel dimension is first
+        3. Adjust the spacing of the image
+        4. Normalize the intensities slice by slice
+        """
         return [
             tr.LoadImaged(keys=["image"]),
             tr.EnsureChannelFirstd(keys=["image"]),
@@ -105,7 +111,14 @@ def load_model(model_path, device):
 
 
 def perform_inference(model, dataloader, device, test_transforms_list, output_path, suffix):
-    """Run the inference and save the predictions."""
+    """
+    Runs the actual inference process on the prepared data:
+    1. Uses sliding window inference for large images
+    2. Applies post-processing to the predictions
+    3. Saves the resulting segmentation masks
+    """
+
+    # Configure the sliding window inferer for processing large images
     inferer = SliceInferer(
         roi_size=(DEFAULT_IMG_SIZE, DEFAULT_IMG_SIZE),
         spatial_dim=2,
@@ -114,6 +127,7 @@ def perform_inference(model, dataloader, device, test_transforms_list, output_pa
         progress=False
     )
 
+    # Define post-processing steps for the model predictions
     post_transforms = tr.Compose([
         tr.Invertd(
             keys="pred",
@@ -133,6 +147,7 @@ def perform_inference(model, dataloader, device, test_transforms_list, output_pa
         ),
     ])
 
+    # Run inference on all images in the dataloader
     with torch.no_grad():
         for test_data in tqdm(dataloader, desc="Processing"):
             test_inputs = test_data["image"].to(device)
@@ -151,31 +166,27 @@ def process_3D(input_file, args):
 
 
 def process_4D(input_file, args, data):
+
+    # Create temporary directory for processing individual volumes
     tmp_folder = Path(args.output_path) / "tmp"
     tmp_folder.mkdir(parents=True, exist_ok=True)
-
-    data_4d = data.get_fdata()
-
-    for i in range(data_4d.shape[-1]):
-        volume = data_4d[..., i]
-        output_file = tmp_folder / f"volume_{i}.nii.gz"
-        nib.save(nib.Nifti1Image(volume, data.affine), output_file)
-
+    
+    # Split 4D volume into separate 3D volumes
+    volumes = [data.get_fdata()[..., i] for i in range(data.get_fdata().shape[-1])]
+    output_files = [tmp_folder / f"volume_{i}.nii.gz" for i in range(len(volumes))]
+    [nib.save(nib.Nifti1Image(vol, data.affine), file) for vol, file in zip(volumes, output_files)]
+    
+    # Process each 3D volume
     model = load_model(args.saved_model_path, args.device)
-    data_loader = FetalTestDataLoader(tmp_folder)
-    test_dataloader, test_transforms_list = data_loader.load_data()
-
+    test_dataloader, test_transforms_list = FetalTestDataLoader(tmp_folder).load_data()
     perform_inference(model, test_dataloader, args.device, test_transforms_list, str(tmp_folder), args.suffix)
-
-    masked_volumes = sorted(tmp_folder.glob(f"volume_*{args.suffix}.nii*"))
-
-    data_list = [nib.load(file).get_fdata() for file in masked_volumes]
-    data_4d_masked = np.stack(data_list, axis=-1)
-    nifti_4d = nib.Nifti1Image(data_4d_masked, data.affine)
-
+    
+    # Recombine processed volumes into a 4D result
+    data_4d_masked = np.stack([nib.load(f).get_fdata() for f in sorted(tmp_folder.glob(f"volume_*{args.suffix}.nii*"))], axis=-1)
     output_file = Path(args.output_path) / f"{Path(input_file).stem}_{args.suffix}.nii.gz"
-    nib.save(nifti_4d, output_file)
-
+    nib.save(nib.Nifti1Image(data_4d_masked, data.affine), output_file)
+    
+    # Clean up temporary files
     shutil.rmtree(tmp_folder)
 
 
