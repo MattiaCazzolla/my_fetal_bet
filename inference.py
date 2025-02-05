@@ -1,4 +1,5 @@
 import os
+import sys
 from pathlib import Path
 import argparse
 from glob import glob
@@ -17,7 +18,7 @@ from tqdm import tqdm
 
 # Constants
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DEFAULT_MODEL_PATH = "./AttUNet.pth"
+DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])), 'AttUNet.pth')
 DEFAULT_BATCH_SIZE = 8
 DEFAULT_NUM_WORKERS = 2
 DEFAULT_IMG_SIZE = 256
@@ -67,22 +68,17 @@ class FetalTestDataLoader:
             SliceWiseNormalizeIntensityd(keys=["image"], subtrahend=0.0, divisor=None, nonzero=True),
         ]
 
+    
     def load_data(self):
         """Create and load the test dataset."""
         test_transforms_list = self.get_transforms()
-        test_files = [{"image": self.test_data_path}]
-        test_dataset = Dataset(data=test_files, transform=tr.Compose(test_transforms_list))
-        test_dataloader = DataLoader(
-            test_dataset, batch_size=DEFAULT_BATCH_SIZE, num_workers=DEFAULT_NUM_WORKERS
-        )
-        return test_dataloader, test_transforms_list
-    
-    def load_data_4D(self, folder):
-        """Create and load the test dataset."""
-        test_transforms_list = self.get_transforms()
-        test_images = sorted(glob(os.path.join(folder, "*.nii*")))
 
-        test_files = [{"image": image_name} for image_name in test_images]
+        if os.path.isdir(self.test_data_path):
+            test_images = sorted(glob(os.path.join(self.test_data_path, "*.nii*")))
+            test_files = [{"image": image_name} for image_name in test_images]
+        else:
+            test_files = [{"image": self.test_data_path}]
+
         test_dataset = Dataset(data=test_files, transform=tr.Compose(test_transforms_list))
         test_dataloader = DataLoader(
             test_dataset, batch_size=DEFAULT_BATCH_SIZE, num_workers=DEFAULT_NUM_WORKERS
@@ -146,61 +142,67 @@ def perform_inference(model, dataloader, device, test_transforms_list, output_pa
     print("Process completed")
 
 
+def process_3D(input_file, args):
+    model = load_model(args.saved_model_path, args.device)
+    data_loader = FetalTestDataLoader(input_file)
+    test_dataloader, test_transforms_list = data_loader.load_data()
+
+    perform_inference(model, test_dataloader, args.device, test_transforms_list, args.output_path, args.suffix)
+
+
+def process_4D(input_file, args, data):
+    tmp_folder = Path(args.output_path) / "tmp"
+    tmp_folder.mkdir(parents=True, exist_ok=True)
+
+    data_4d = data.get_fdata()
+
+    for i in range(data_4d.shape[-1]):
+        volume = data_4d[..., i]
+        output_file = tmp_folder / f"volume_{i}.nii.gz"
+        nib.save(nib.Nifti1Image(volume, data.affine), output_file)
+
+    model = load_model(args.saved_model_path, args.device)
+    data_loader = FetalTestDataLoader(tmp_folder)
+    test_dataloader, test_transforms_list = data_loader.load_data()
+
+    perform_inference(model, test_dataloader, args.device, test_transforms_list, str(tmp_folder), args.suffix)
+
+    masked_volumes = sorted(tmp_folder.glob(f"volume_*{args.suffix}.nii*"))
+
+    data_list = [nib.load(file).get_fdata() for file in masked_volumes]
+    data_4d_masked = np.stack(data_list, axis=-1)
+    nifti_4d = nib.Nifti1Image(data_4d_masked, data.affine)
+
+    output_file = Path(args.output_path) / f"{Path(input_file).stem}_{args.suffix}.nii.gz"
+    nib.save(nifti_4d, output_file)
+
+    shutil.rmtree(tmp_folder)
+
+
+
+def process_file(file_path, args):
+
+    data = nib.load(str(file_path))
+    if data.get_fdata().ndim == 3:
+        process_3D(file_path, args)
+    else:
+        process_4D(file_path, args, data)
+
+
+def process_folder(folder_path, args):
+
+    for file_path in sorted(Path(folder_path).glob("*.nii*")):
+        process_file(file_path, args)
+
+
+
 def main(args):
 
     os.makedirs(str(Path(args.output_path)), exist_ok=True)
-
-    # check if data is 3D or 4D
-    data = nib.load(args.input_path)
-
-    if len(data.get_fdata().shape) == 3:
-
-        # Load model
-        model = load_model(args.saved_model_path, args.device)
-
-        # Load data
-        data_loader = FetalTestDataLoader(args.input_path)
-        test_dataloader, test_transforms_list = data_loader.load_data()
-
-        # Perform inference
-        perform_inference(model, test_dataloader, args.device, test_transforms_list, args.output_path, args.suffix)
-
+    if os.path.isdir(args.input_path):
+        process_folder(args.input_path, args)
     else:
-        # create tmp folder
-        tmp_folder = str(Path(os.path.join(args.output_path, 'tmp')))
-        os.makedirs(tmp_folder, exist_ok=True)
-
-        # split data in 3D volumes
-        data_4d = data.get_fdata()
-        for i in range(data_4d.shape[-1]):
-            volume = data_4d[..., i]
-            output_file = os.path.join(tmp_folder, f"volume_{i}.nii.gz")
-            nib.save(nib.Nifti1Image(volume, data.affine), output_file)
-
-        # Load model
-        model = load_model(args.saved_model_path, args.device)
-
-        # Load data
-        data_loader = FetalTestDataLoader(args.input_path)
-        test_dataloader, test_transforms_list = data_loader.load_data_4D(tmp_folder)
-
-        # Perform inference
-        perform_inference(model, test_dataloader, args.device, test_transforms_list, tmp_folder, args.suffix)
-
-        # merge data back together
-        masked_volumes = sorted(glob(os.path.join(tmp_folder, f"volume_*{args.suffix}.nii*")))
-
-        data_list = []
-        for file in masked_volumes:
-            nifti = nib.load(file)
-            data_list.append(nifti.get_fdata())
-
-        data_4d = np.stack(data_list, axis=-1)
-        nifti_4d = nib.Nifti1Image(data_4d, data.affine)
-        nib.save(nifti_4d, os.path.join(args.output_path, f"{str(Path(args.input_path).stem).split('.')[0]}_{args.suffix}.nii.gz"))
-
-        shutil.rmtree(tmp_folder)
-
+        process_file(args.input_path, args)
 
 
 if __name__ == '__main__':
