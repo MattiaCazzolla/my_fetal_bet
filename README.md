@@ -1,5 +1,5 @@
 # My Fetal BET  
-A customized version of [**fetal-BET**](https://github.com/bchimagine/fetal-brain-extraction) with enhanced functionality and code improvements.  
+A customized version of inference script of [**fetal-BET**](https://github.com/bchimagine/fetal-brain-extraction) with enhanced functionality and code improvements.  
 
 ## Key Differences  
 - Support for 4D data  

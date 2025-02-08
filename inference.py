@@ -1,22 +1,23 @@
 import os
 import sys
-from pathlib import Path
+import shutil
 import argparse
 from glob import glob
-import shutil
+from pathlib import Path
+
+from tqdm import tqdm
 
 import torch
 import numpy as np
 import nibabel as nib
 
 import monai.transforms as tr
-from monai.data import decollate_batch, Dataset, DataLoader
 from monai.inferers import SliceInferer
 from monai.networks.nets import AttentionUnet
 from monai.transforms import SaveImaged, MapTransform
-from tqdm import tqdm
+from monai.data import decollate_batch, Dataset, DataLoader
 
-# Constants
+
 DEFAULT_DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEFAULT_MODEL_PATH = os.path.join(os.path.dirname(os.path.realpath(sys.argv[0])), 'AttUNet.pth')
 DEFAULT_BATCH_SIZE = 8
@@ -183,7 +184,7 @@ def process_4D(input_file, args, data):
     
     # Recombine processed volumes into a 4D result
     data_4d_masked = np.stack([nib.load(f).get_fdata() for f in sorted(tmp_folder.glob(f"volume_*{args.suffix}.nii*"))], axis=-1)
-    output_file = Path(args.output_path) / f"{Path(input_file).stem}_{args.suffix}.nii.gz"
+    output_file = Path(args.output_path) / f"{str(Path(input_file).stem).split('.')[0]}_{args.suffix}.nii.gz"
     nib.save(nib.Nifti1Image(data_4d_masked, data.affine), output_file)
     
     # Clean up temporary files
