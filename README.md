@@ -19,7 +19,7 @@ pip install -r requirements.txt
 
 **Download the singularity file:**
 ```
-singularity pull faghihpirayesh/fetal-bet
+singularity pull fetal-bet.sif docker://faghihpirayesh/fetal-bet
 ```
 
 **Copy the weights to local host:**
